@@ -1,0 +1,15 @@
+[Unit]
+Description=Github Webhook Catcher
+After=network.target auditd.service
+
+[Service]
+ExecStart=github-webhook-catcher -command /opt/github-webhook-catcher/catcher.sh
+ExecReload=/bin/kill -HUP \$MAINPID
+KillMode=process
+Restart=on-failure
+RestartPreventExitStatus=255
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
+Alias=github-webhook-catcher.service
