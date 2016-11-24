@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func main() {
@@ -65,8 +66,10 @@ func main() {
 
 func handleWebHook(source, cmd, accessToken string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != source {
-			log.Printf("[WARN] Got request from '%s' but expected '%s'. Ignoring\n", r.Host, source)
+		remote := r.RemoteAddr[0:strings.LastIndex(r.RemoteAddr, ":")]
+
+		if remote != source {
+			log.Printf("[WARN] Got request from '%s' but expected '%s'. Ignoring\n", remote, source)
 			w.WriteHeader(401)
 			return
 		}
@@ -81,15 +84,6 @@ func handleWebHook(source, cmd, accessToken string) func(w http.ResponseWriter, 
 		command.Stderr = os.Stderr
 		command.Stdout = os.Stdout
 
-		json, err := ioutil.ReadAll(r.Body)
-		r.Body.Close()
-		if err != nil {
-			log.Printf("[ERROR] Problem reading body of http request: %s\n", err)
-			w.WriteHeader(400)
-			return
-		}
-		w.WriteHeader(200)
-
 		cw, err := command.StdinPipe()
 		if err != nil {
 			log.Printf("[ERROR] Problem creating stdin pipe to the command '%s': %s\n", cmd, err)
@@ -103,12 +97,21 @@ func handleWebHook(source, cmd, accessToken string) func(w http.ResponseWriter, 
 			return
 		}
 
+		json, err := ioutil.ReadAll(r.Body)
+		r.Body.Close()
+		if err != nil {
+			log.Printf("[ERROR] Problem reading body of http request: %s\n", err)
+			w.WriteHeader(400)
+			return
+		}
+		w.WriteHeader(200)
+
 		_, err = fmt.Fprintf(cw, string(json))
 		if err != nil {
 			log.Printf("[ERROR] Problem writing to the stdin pipe of the command '%s': %s\n", cmd, err)
 			return
 		}
 
-		log.Printf("[INFO] Got WebHook notification from %s: %s", source, r.RemoteAddr)
+		log.Println("[INFO] Got WebHook notification from", r.RemoteAddr, ". Sent to", cmd)
 	}
 }
