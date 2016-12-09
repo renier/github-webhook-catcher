@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/bradfitz/gomemcache/memcache"
 )
 
 func main() {
@@ -22,6 +25,12 @@ func main() {
 		"command",
 		"",
 		"Command to execute once a webhook notification is received. Required",
+	)
+
+	queue := flag.String(
+		"queue-addr",
+		"",
+		"Siberite/Memcache address to queue push event in. Required, but mutually exclusive to command option.",
 	)
 
 	tlsKey := flag.String(
@@ -50,13 +59,18 @@ func main() {
 
 	flag.Parse()
 
-	if *command == "" {
-		fmt.Println("-command is required")
+	if *command == "" && *queue == "" {
+		fmt.Println("-command or -queue is required")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	http.HandleFunc("/", handleWebHook(*sourceHost, *command, *accessToken))
+	var mc *memcache.Client
+	if *queue != "" {
+		mc = memcache.New(*queue)
+	}
+
+	http.HandleFunc("/", handleWebHook(*sourceHost, *command, *accessToken, mc))
 	if *tlsKey != "" && *tlsCert != "" {
 		log.Fatal(http.ListenAndServeTLS(":"+*port, *tlsCert, *tlsKey, nil))
 	} else {
@@ -64,8 +78,9 @@ func main() {
 	}
 }
 
-func handleWebHook(source, cmd, accessToken string) func(w http.ResponseWriter, r *http.Request) {
+func handleWebHook(source, cmd, accessToken string, mc *memcache.Client) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
 		remote := r.RemoteAddr[0:strings.LastIndex(r.RemoteAddr, ":")]
 
 		if remote != source {
@@ -77,6 +92,34 @@ func handleWebHook(source, cmd, accessToken string) func(w http.ResponseWriter, 
 		if accessToken != "" && accessToken != r.URL.RawQuery {
 			log.Println("[WARN] Request did not provide expected access token. Ignoring")
 			w.WriteHeader(401)
+			return
+		}
+
+		jsonBytes, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("[ERROR] Problem reading body of http request: %s\n", err)
+			w.WriteHeader(400)
+			return
+		}
+		w.WriteHeader(200)
+
+		if mc != nil { // Push to a queue and do not send to a command
+			// Determine repo name (e.g. jq -r '.repository.name')
+			var jsonObj map[string]interface{}
+			err = json.Unmarshal(jsonBytes, &jsonObj)
+			if err != nil {
+				log.Println("[ERROR] Could not unmarshal json received from github: ", err)
+				return
+			}
+
+			repo := jsonObj["repository"].(map[string]interface{})["name"].(string)
+			err = mc.Set(&memcache.Item{Key: repo, Value: jsonBytes})
+			if err != nil {
+				log.Println("[ERROR] Could not set key in the queue. Check the queue service.")
+				return
+			}
+
+			log.Printf("[INFO] Stored push event in queue '%s'\n", repo)
 			return
 		}
 
@@ -97,16 +140,7 @@ func handleWebHook(source, cmd, accessToken string) func(w http.ResponseWriter, 
 			return
 		}
 
-		json, err := ioutil.ReadAll(r.Body)
-		r.Body.Close()
-		if err != nil {
-			log.Printf("[ERROR] Problem reading body of http request: %s\n", err)
-			w.WriteHeader(400)
-			return
-		}
-		w.WriteHeader(200)
-
-		_, err = fmt.Fprintf(cw, string(json))
+		_, err = fmt.Fprintf(cw, string(jsonBytes))
 		if err != nil {
 			log.Printf("[ERROR] Problem writing to the stdin pipe of the command '%s': %s\n", cmd, err)
 			return

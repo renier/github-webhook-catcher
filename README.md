@@ -1,6 +1,10 @@
 # Github Webhook Catcher
 
-A server that listens for webhook notifications and passes the body of the request off to a configured command. Intended to be used to listen to Github webhook notifications, but they could come from any kind of place. What drove this was the need to execute concourse.ci jobs when a webhook notification came in, [a feature that is not yet intrisically available in concourse](https://github.com/concourse/concourse/issues/331).
+A server that listens for webhook notifications and passes the body of the
+request off to a configured command. Intended to be used to listen to Github
+webhook notifications, but they could come from any kind of place. What drove
+this was the need to execute concourse.ci jobs when a webhook notification came
+in, [a feature that is not yet intrisically available in concourse](https://github.com/concourse/concourse/issues/331).
 
 ## Usage
 
@@ -10,6 +14,8 @@ Usage of github-webhook-catcher:
     	If provided, any webhook notification must pass the same token in the query string of the request
   -command string
     	Command to execute once a webhook notification is received. Required
+  -queue-addr
+        Siberite/Memcache address to queue push event in. Required, but mutually exclusive to command
   -port string
     	Port to listen for webhook notifications on (default "8088")
   -source-host string
