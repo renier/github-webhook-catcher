@@ -115,7 +115,7 @@ func handleWebHook(source, cmd, accessToken string, mc *memcache.Client) func(w 
 			repo := jsonObj["repository"].(map[string]interface{})["name"].(string)
 			err = mc.Set(&memcache.Item{Key: repo, Value: jsonBytes})
 			if err != nil {
-				log.Println("[ERROR] Could not set key in the queue. Check the queue service.")
+				log.Printf("[ERROR] Could not set key '%s' in the queue. Check the queue service: %s\n", repo, err)
 				return
 			}
 
